@@ -1,9 +1,11 @@
 import React from 'react';
 import { useChat } from '../../hooks/useChat';
+import { databaseService } from '../../services/database/DatabaseService';
 
 interface HomeScreenProps {
   onChat: () => void;
   onMeditation: () => void;
+  userId?: string;
 }
 
 const EMOTIONAL_STATES = [
@@ -13,12 +15,26 @@ const EMOTIONAL_STATES = [
   { id: 'empty', label: 'Пусто', message: 'Я чувствую пустоту внутри.' },
 ];
 
-const HomeScreen: React.FC<HomeScreenProps> = ({ onChat, onMeditation }) => {
-  const { sendMessage } = useChat();
+const HomeScreen: React.FC<HomeScreenProps> = ({ onChat, onMeditation, userId }) => {
+  const { sendMessage } = useChat(userId);
 
-  const handleEmotionalState = async (message: string) => {
-    await sendMessage(message);
-    onChat(); // Переходим к чату после выбора состояния
+  const handleEmotionalState = async (state: string, message: string) => {
+    try {
+      // Если есть userId, сохраняем эмоциональное состояние
+      if (userId) {
+        await databaseService.recordEmotionalState({
+          userId,
+          state,
+          note: message
+        });
+      }
+
+      // Отправляем сообщение в чат
+      await sendMessage(message);
+      onChat(); // Переходим к чату после выбора состояния
+    } catch (error) {
+      console.error('Ошибка при сохранении эмоционального состояния:', error);
+    }
   };
 
   return (
@@ -47,7 +63,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onChat, onMeditation }) => {
               {EMOTIONAL_STATES.map((state) => (
                 <button
                   key={state.id}
-                  onClick={() => handleEmotionalState(state.message)}
+                  onClick={() => handleEmotionalState(state.id, state.message)}
                   className="bg-white bg-opacity-20 py-2 px-4 rounded-full text-sm font-medium hover:bg-opacity-30 transition-all"
                 >
                   {state.label}

@@ -1,27 +1,102 @@
 import OpenAI from 'openai';
 
-class OpenAIService {
+export class OpenAIService {
   private openai: OpenAI;
   private assistantId: string;
+  private activeRuns: Map<string, string>;
 
   constructor() {
-    if (!process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
-      throw new Error('OpenAI API key is not configured');
+    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    const assistantId = process.env.NEXT_PUBLIC_OPENAI_ASSISTANT_ID;
+
+    if (!apiKey) {
+      throw new Error('NEXT_PUBLIC_OPENAI_API_KEY is not configured');
+    }
+
+    if (!assistantId) {
+      throw new Error('NEXT_PUBLIC_OPENAI_ASSISTANT_ID is not configured');
     }
 
     this.openai = new OpenAI({
-      apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-      dangerouslyAllowBrowser: true // Разрешаем использование в браузере
+      apiKey,
+      dangerouslyAllowBrowser: true
     });
-    
-    this.assistantId = process.env.NEXT_PUBLIC_OPENAI_ASSISTANT_ID || '';
-    
-    if (!this.assistantId) {
-      throw new Error('OpenAI Assistant ID is not configured');
+
+    this.assistantId = assistantId;
+    this.activeRuns = new Map();
+  }
+
+  async sendMessage(threadId: string, content: string): Promise<void> {
+    try {
+      // Проверяем, есть ли активный run для этого треда
+      const activeRunId = this.activeRuns.get(threadId);
+      if (activeRunId) {
+        // Если есть активный run, ждем его завершения
+        await this.waitForRun(threadId, activeRunId);
+      }
+
+      // Создаем сообщение
+      await this.openai.beta.threads.messages.create(threadId, {
+        role: 'user',
+        content: content
+      });
+
+      // Создаем новый run
+      const run = await this.openai.beta.threads.runs.create(threadId, {
+        assistant_id: this.assistantId
+      });
+
+      // Сохраняем активный run
+      this.activeRuns.set(threadId, run.id);
+
+      // Ждем завершения run
+      await this.waitForRun(threadId, run.id);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      throw error;
     }
   }
 
-  async createThread() {
+  private async waitForRun(threadId: string, runId: string): Promise<void> {
+    while (true) {
+      const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
+      
+      if (run.status === 'completed') {
+        this.activeRuns.delete(threadId);
+        break;
+      } else if (run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired') {
+        this.activeRuns.delete(threadId);
+        throw new Error(`Run failed with status: ${run.status}`);
+      }
+
+      // Ждем 1 секунду перед следующей проверкой
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  async getMessages(threadId: string): Promise<Array<{ role: string; content: string }>> {
+    try {
+      const messages = await this.openai.beta.threads.messages.list(threadId);
+      return messages.data.map(message => {
+        const content = message.content[0];
+        if ('text' in content) {
+          return {
+            role: message.role,
+            content: content.text.value
+          };
+        }
+        return {
+          role: message.role,
+          content: 'Unsupported message type'
+        };
+      });
+    } catch (error) {
+      console.error('Error getting messages:', error);
+      throw error;
+    }
+  }
+
+  async createThread(): Promise<string> {
     try {
       const thread = await this.openai.beta.threads.create();
       return thread.id;
@@ -30,57 +105,4 @@ class OpenAIService {
       throw error;
     }
   }
-
-  async sendMessage(threadId: string, content: string) {
-    try {
-      await this.openai.beta.threads.messages.create(threadId, {
-        role: 'user',
-        content: content,
-      });
-
-      const run = await this.openai.beta.threads.runs.create(threadId, {
-        assistant_id: this.assistantId,
-      });
-
-      return this.waitForResponse(threadId, run.id);
-    } catch (error) {
-      console.error('Error sending message:', error);
-      throw error;
-    }
-  }
-
-  private async waitForResponse(threadId: string, runId: string) {
-    try {
-      let run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
-      
-      // Ждем завершения выполнения
-      while (run.status === 'in_progress' || run.status === 'queued') {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
-      }
-
-      if (run.status === 'completed') {
-        const messages = await this.openai.beta.threads.messages.list(threadId);
-        const lastMessage = messages.data[0];
-        
-        // Извлекаем текстовое содержимое из сообщения
-        const textContent = lastMessage.content.find(
-          content => content.type === 'text'
-        );
-
-        if (!textContent || textContent.type !== 'text') {
-          throw new Error('No text content in response');
-        }
-
-        return textContent.text.value;
-      } else {
-        throw new Error(`Run ended with status: ${run.status}`);
-      }
-    } catch (error) {
-      console.error('Error waiting for response:', error);
-      throw error;
-    }
-  }
-}
-
-export const openAIService = new OpenAIService(); 
+} 

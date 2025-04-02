@@ -15,6 +15,7 @@ interface Meditation {
 
 interface MeditationScreenProps {
   onBack: () => void;
+  userId?: string;
 }
 
 const meditations: Meditation[] = [
@@ -36,7 +37,7 @@ const meditations: Meditation[] = [
   },
 ];
 
-const MeditationScreen: React.FC<MeditationScreenProps> = ({ onBack }) => {
+const MeditationScreen: React.FC<MeditationScreenProps> = ({ onBack, userId }) => {
   const [selectedMeditation, setSelectedMeditation] = useState<Meditation | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
