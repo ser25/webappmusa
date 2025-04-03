@@ -1,17 +1,10 @@
-import React, { useEffect } from 'react';
+import '../i18n';
 import MuseApp from '../components/screens/MuseApp';
-import { initTelegramApp } from '../utils/telegram';
 
-const Home: React.FC = () => {
-  useEffect(() => {
-    initTelegramApp();
-  }, []);
-
+export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
       <MuseApp />
     </div>
   );
-};
-
-export default Home; 
+} 

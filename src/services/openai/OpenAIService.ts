@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 export class OpenAIService {
   private openai: OpenAI;
@@ -26,34 +27,85 @@ export class OpenAIService {
     this.activeRuns = new Map();
   }
 
-  async sendMessage(threadId: string, content: string): Promise<void> {
+  async sendMessage(messages: ChatCompletionMessageParam[], onStream?: (content: string) => void): Promise<string> {
     try {
-      // Проверяем, есть ли активный run для этого треда
-      const activeRunId = this.activeRuns.get(threadId);
-      if (activeRunId) {
-        // Если есть активный run, ждем его завершения
-        await this.waitForRun(threadId, activeRunId);
+      if (onStream) {
+        // Використовуємо стрімінг
+        const stream = await this.openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages,
+          stream: true,
+        });
+
+        let fullContent = '';
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || '';
+          if (content) {
+            fullContent += content;
+            onStream(fullContent);
+          }
+        }
+        return fullContent;
+      } else {
+        // Без стрімінгу
+        const completion = await this.openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages,
+        });
+
+        return completion.choices[0]?.message?.content || '';
       }
-
-      // Создаем сообщение
-      await this.openai.beta.threads.messages.create(threadId, {
-        role: 'user',
-        content: content
-      });
-
-      // Создаем новый run
-      const run = await this.openai.beta.threads.runs.create(threadId, {
-        assistant_id: this.assistantId
-      });
-
-      // Сохраняем активный run
-      this.activeRuns.set(threadId, run.id);
-
-      // Ждем завершения run
-      await this.waitForRun(threadId, run.id);
     } catch (error) {
       console.error('Error sending message:', error);
       throw error;
+    }
+  }
+
+  private async streamRun(threadId: string, runId: string, onStream: (content: string) => void): Promise<void> {
+    let lastMessageId: string | null = null;
+    
+    while (true) {
+      try {
+        const run = await this.openai.beta.threads.runs.retrieve(threadId, runId);
+        
+        if (run.status === 'completed') {
+          // Отримуємо фінальне повідомлення
+          const messages = await this.openai.beta.threads.messages.list(threadId);
+          const lastMessage = messages.data[0];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            const textContent = lastMessage.content.find(content => 'text' in content);
+            if (textContent && 'text' in textContent) {
+              onStream(textContent.text.value);
+            }
+          }
+          this.activeRuns.delete(threadId);
+          break;
+        } else if (run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired') {
+          this.activeRuns.delete(threadId);
+          throw new Error(`Run failed with status: ${run.status}`);
+        } else if (run.status === 'in_progress') {
+          // Отримуємо останні повідомлення
+          const messages = await this.openai.beta.threads.messages.list(threadId);
+          const lastMessage = messages.data[0];
+          
+          // Перевіряємо, чи це нове повідомлення
+          if (lastMessage && lastMessage.role === 'assistant' && lastMessage.id !== lastMessageId) {
+            lastMessageId = lastMessage.id;
+            
+            // Перевіряємо наявність текстового контенту
+            const textContent = lastMessage.content.find(content => 'text' in content);
+            if (textContent && 'text' in textContent) {
+              onStream(textContent.text.value);
+            }
+          }
+        }
+
+        // Чекаємо перед наступною перевіркою
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.error('Error in streamRun:', error);
+        throw error;
+      }
     }
   }
 
@@ -69,7 +121,7 @@ export class OpenAIService {
         throw new Error(`Run failed with status: ${run.status}`);
       }
 
-      // Ждем 1 секунду перед следующей проверкой
+      // Чекаємо перед наступною перевіркою
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
@@ -78,11 +130,11 @@ export class OpenAIService {
     try {
       const messages = await this.openai.beta.threads.messages.list(threadId);
       return messages.data.map(message => {
-        const content = message.content[0];
-        if ('text' in content) {
+        const textContent = message.content.find(content => 'text' in content);
+        if (textContent && 'text' in textContent) {
           return {
             role: message.role,
-            content: content.text.value
+            content: textContent.text.value
           };
         }
         return {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import TitleScreen from './TitleScreen';
 import HomeScreen from './HomeScreen';
-import ChatScreen from './ChatScreen';
+import { ChatScreen } from './ChatScreen';
 import MeditationScreen from './MeditationScreen';
 
 type Screen = 'title' | 'home' | 'chat' | 'meditation';

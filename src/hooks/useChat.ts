@@ -1,43 +1,45 @@
 import { useState, useEffect, useCallback } from 'react';
 import { OpenAIService } from '../services/openai/OpenAIService';
 import { databaseService } from '../services/database/DatabaseService';
+import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 interface Message {
-  role: string;
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
 const openAIService = new OpenAIService();
 
+const SYSTEM_MESSAGE: Message = {
+  role: 'system',
+  content: 'Ти - Муза, емпатичний та підтримуючий AI-асистент. Ти спілкуєшся українською мовою та допомагаєш користувачам впоратися з їхніми емоціями, думками та переживаннями. Ти завжди відповідаєш з турботою та розумінням.'
+};
+
 export const useChat = (userId?: string) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState<string | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
+  const [streamingMessage, setStreamingMessage] = useState<string>('');
 
-  // Инициализация чата
+  // Ініціалізація чату
   useEffect(() => {
     const initChat = async () => {
       try {
-        // Создаем тред в OpenAI
-        const newThreadId = await openAIService.createThread();
-        setThreadId(newThreadId);
-
-        // Если есть userId, создаем чат в базе данных
+        // Якщо є userId, створюємо чат в базі даних
         if (userId) {
           const chat = await databaseService.createChat(userId);
           setChatId(chat.id);
         }
         
-        // Добавляем приветственное сообщение
-        const welcomeMessage = {
+        // Додаємо привітальне повідомлення
+        const welcomeMessage: Message = {
           role: 'assistant',
-          content: 'Привет! Я твоя Муза. Как ты себя чувствуешь сегодня?'
+          content: 'Привіт! Я твоя Муза. Як ти себе почуваєш сьогодні?'
         };
         setMessages([welcomeMessage]);
 
-        // Сохраняем приветственное сообщение в базу, если есть chatId
+        // Зберігаємо привітальне повідомлення в базу, якщо є chatId
         if (chatId) {
           await databaseService.addMessage({
             chatId,
@@ -46,7 +48,7 @@ export const useChat = (userId?: string) => {
           });
         }
       } catch (err) {
-        setError('Ошибка инициализации чата');
+        setError('Помилка ініціалізації чату');
         console.error(err);
       }
     };
@@ -54,22 +56,18 @@ export const useChat = (userId?: string) => {
     initChat();
   }, [userId]);
 
-  // Отправка сообщения
+  // Надсилання повідомлення
   const sendMessage = useCallback(async (content: string) => {
-    if (!threadId) {
-      setError('Чат не инициализирован');
-      return;
-    }
-
     try {
       setIsLoading(true);
       setError(null);
+      setStreamingMessage('');
 
-      // Добавляем сообщение пользователя
-      const userMessage = { role: 'user', content };
+      // Додаємо повідомлення користувача
+      const userMessage: Message = { role: 'user', content };
       setMessages(prev => [...prev, userMessage]);
 
-      // Сохраняем сообщение пользователя в базу
+      // Зберігаємо повідомлення користувача в базу
       if (chatId) {
         await databaseService.addMessage({
           chatId,
@@ -78,21 +76,29 @@ export const useChat = (userId?: string) => {
         });
       }
 
-      // Отправляем сообщение в OpenAI
-      await openAIService.sendMessage(threadId, content);
+      // Формуємо історію повідомлень для API
+      const apiMessages: ChatCompletionMessageParam[] = [
+        SYSTEM_MESSAGE,
+        ...messages,
+        userMessage
+      ];
 
-      // Получаем обновленные сообщения
-      const updatedMessages = await openAIService.getMessages(threadId);
-      setMessages(updatedMessages.reverse());
+      // Надсилаємо повідомлення в OpenAI з підтримкою стрімінгу
+      const finalContent = await openAIService.sendMessage(apiMessages, (streamContent) => {
+        setStreamingMessage(streamContent);
+      });
 
-      // Сохраняем последнее сообщение ассистента в базу
-      if (chatId) {
-        const lastMessage = updatedMessages[0];
-        if (lastMessage && lastMessage.role === 'assistant') {
+      // Додаємо фінальне повідомлення асистента
+      if (finalContent) {
+        const assistantMessage: Message = { role: 'assistant', content: finalContent };
+        setMessages(prev => [...prev, assistantMessage]);
+
+        // Зберігаємо повідомлення асистента в базу
+        if (chatId) {
           await databaseService.addMessage({
             chatId,
-            content: lastMessage.content,
-            role: lastMessage.role
+            content: assistantMessage.content,
+            role: assistantMessage.role
           });
         }
       }
@@ -100,26 +106,27 @@ export const useChat = (userId?: string) => {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Произошла ошибка при отправке сообщения');
+        setError('Сталася помилка при надсиланні повідомлення');
       }
       console.error(err);
     } finally {
       setIsLoading(false);
+      setStreamingMessage('');
     }
-  }, [threadId, chatId]);
+  }, [messages, chatId]);
 
-  // Загрузка истории сообщений
+  // Завантаження історії повідомлень
   useEffect(() => {
     const loadChatHistory = async () => {
       if (chatId) {
         try {
           const history = await databaseService.getChatMessages(chatId);
           setMessages(history.map(msg => ({
-            role: msg.role,
+            role: msg.role as 'user' | 'assistant',
             content: msg.content
           })));
         } catch (err) {
-          console.error('Ошибка загрузки истории чата:', err);
+          console.error('Помилка завантаження історії чату:', err);
         }
       }
     };
@@ -129,6 +136,7 @@ export const useChat = (userId?: string) => {
 
   return {
     messages,
+    streamingMessage,
     isLoading,
     error,
     sendMessage

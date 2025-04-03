@@ -1,20 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../../hooks/useChat';
+import { useTranslation } from 'react-i18next';
 
 interface ChatScreenProps {
-  onBack: () => void;
+  onBack?: () => void;
   userId?: string;
 }
 
 const QUICK_RESPONSES = [
-  { id: 'meditation', text: 'Медитация' },
-  { id: 'anxiety', text: 'Мне тревожно' },
-  { id: 'help', text: 'Как ты можешь помочь?' },
-  { id: 'today', text: 'Как прожить этот день?' },
+  { id: 'meditation', text: 'Медитація' },
+  { id: 'anxiety', text: 'Мені тривожно' },
+  { id: 'help', text: 'Як ти можеш допомогти?' },
+  { id: 'today', text: 'Як прожити цей день?' },
 ];
 
-const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
-  const { messages, isLoading, error, sendMessage } = useChat(userId);
+export const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
+  const { t } = useTranslation();
+  const { messages, streamingMessage, isLoading, error, sendMessage } = useChat(userId);
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +26,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, streamingMessage]);
 
   const handleSendMessage = async () => {
     if (messageInput.trim() === '' || isLoading) return;
@@ -39,23 +41,32 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
     await sendMessage(text);
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <header className="bg-white p-4 shadow-sm flex items-center justify-between">
         <div className="flex items-center">
-          <button 
-            onClick={onBack}
-            className="mr-2 text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            Назад
-          </button>
+          {onBack && (
+            <button 
+              onClick={onBack}
+              className="mr-2 text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Назад
+            </button>
+          )}
           <div className="flex items-center">
             <div className="h-9 w-9 rounded-full bg-purple-600 flex items-center justify-center text-white text-base font-semibold">
               M
             </div>
             <div className="ml-3">
               <h1 className="text-base font-semibold text-gray-800">Муза</h1>
-              <p className="text-xs text-green-600">{isLoading ? 'Печатает...' : 'Слушает тебя'}</p>
+              <p className="text-xs text-green-600">{isLoading ? 'Друкує...' : 'Слухає тебе'}</p>
             </div>
           </div>
         </div>
@@ -79,14 +90,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
         {error && (
           <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4">
-            {error}
+            {t('chat.error', { error })}
           </div>
         )}
         <div className="space-y-4">
           {messages.map((message, index) => (
             <div 
               key={index}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
             >
               <div 
                 className={`max-w-xs md:max-w-md lg:max-w-lg rounded-xl px-4 py-3 ${
@@ -95,10 +106,20 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
                     : 'bg-white border border-gray-100 text-gray-800'
                 }`}
               >
-                {message.content}
+                <p className="whitespace-pre-wrap break-words">{message.content}</p>
               </div>
             </div>
           ))}
+          
+          {/* Показуємо повідомлення, що надходить потоком */}
+          {streamingMessage && (
+            <div className="flex justify-start animate-fade-in">
+              <div className="max-w-xs md:max-w-md lg:max-w-lg rounded-xl px-4 py-3 bg-white border border-gray-100 text-gray-800">
+                <p className="whitespace-pre-wrap break-words">{streamingMessage}</p>
+              </div>
+            </div>
+          )}
+          
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -107,14 +128,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
         <div className="flex items-center bg-gray-50 rounded-full px-4 py-2 border border-gray-200">
           <input
             type="text"
-            placeholder="Напиши, как ты себя чувствуешь..."
+            placeholder={t('chat.inputPlaceholder')}
             className="flex-1 bg-transparent outline-none text-gray-800"
             value={messageInput}
             onChange={(e) => setMessageInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+            onKeyPress={handleKeyPress}
             disabled={isLoading}
           />
-          <button 
+          <button
             onClick={handleSendMessage}
             className={`ml-2 p-2 rounded-full ${
               isLoading || messageInput.trim() === ''
@@ -123,12 +144,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ onBack, userId }) => {
             } transition-colors`}
             disabled={isLoading || messageInput.trim() === ''}
           >
-            Отправить
+            {isLoading ? t('chat.sending') : t('chat.send')}
           </button>
         </div>
       </div>
     </div>
   );
-};
-
-export default ChatScreen; 
+}; 
