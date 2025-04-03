@@ -23,7 +23,7 @@ export default async function handler(req: NextRequest) {
 
     // Створюємо стрім відповіді
     const stream = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages,
       stream: true,
     });

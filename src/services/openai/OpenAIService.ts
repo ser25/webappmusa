@@ -32,7 +32,7 @@ export class OpenAIService {
       if (onStream) {
         // Використовуємо стрімінг
         const stream = await this.openai.chat.completions.create({
-          model: 'gpt-3.5-turbo',
+          model: 'gpt-4o',
           messages,
           stream: true,
         });
@@ -49,7 +49,7 @@ export class OpenAIService {
       } else {
         // Без стрімінгу
         const completion = await this.openai.chat.completions.create({
-          model: 'gpt-3.5-turbo',
+          model: 'gpt-4o',
           messages,
         });
 
